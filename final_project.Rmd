@@ -1,5 +1,5 @@
 ---
-title: "Final Project"
+title: "Final Project- NBA Roster Composition By Value"
 author: "Elliott Sloate"
 date: "May 13, 2018"
 output: html_document
@@ -7,5 +7,212 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Roster Building in 
+One of the fundamental questions anyone in the position of making changes to a team's roster in any sport is: "How much more are we winning by adding this player?". Similarly, one can ask themselves "How much less are we winning by losing this player?" While the attempt to quantify an individual player's contribution to winning is far from over, one stat that can help answer this in the NBA is Value Over Replace Player, or VORP, which is explained here: https://www.basketball-reference.com/about/bpm.html. Here's a TL;DR - VORP measures the numbers of points a player produces compared to a "replacement level" player per 100 team possesions over a season. Some nice things about VORP are that a) It is already standardized to the league average and b) It takes minutes played into account, which gives a more accurate reflection of the impact a player has on a team.
+
+With this in mind, one question about roster composition I seek to answer is how important is the distribution of VORP? Imagine two teams with identical total VORP in a season- is a team with one (or 2) incredibly valueabl players better or worse than a team whose VORP is (closer to) evenly distributed? Similarly, how important are a teams starters to their success compared to their bench? I look to answer questions like these in this analysis.
+
+
+## The Data
+
+In this analysis I am using two data sets: one which contains data on player VORP, and the other which has team wins/losses (and thus winnning percentage). The data used to create VORP is only available since the 1973-74 season and the team wins dataset is incomplete for 2017, so we will only look at players and teams from the 1974-2016 window. 
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(dplyr)
+library(readxl)
+#reading in player stats, filtering our old seasons, we only need player, team, year and VORP
+season_stats = read_csv("~/Documents/Sophmore Year Classes/CMSC320/Final Project/Seasons_Stats.csv")
+season_stats <- season_stats %>% filter(Year >= 1974 & Year < 2017) %>% select(Year,Player,Tm,VORP) %>% transform(VORP = as.numeric(VORP)) %>% rename(Team = Tm)
+
+#reading in team results, converting years & teams to same as player dataset
+team_results = read_xlsx("~/Documents/Sophmore Year Classes/CMSC320/Final Project/Historical NBA Performance.xlsx")
+#clean up year data, add 1 to each year to match up
+team_results <- team_results %>% rename(win_pct = Winning_Percentage) %>% select(Year, Team, win_pct)
+team_results <- team_results %>% mutate(Year = if_else(str_detect(Year,"\\d{1,2}/\\d/\\d{4}"), str_match(Year,"\\d{1,2}/\\d/(\\d{4})")[,2], substr(Year,1,4)))
+team_results <- team_results %>% readr::type_convert() %>% mutate(Year = Year + 1) 
+
+#Knicks data is messed up for two years for some reason
+team_results[874,1] = 2017
+team_results[875,1] = 2016
+team_results <- team_results %>% filter(Year < 2017 & Year >= 1974)
+
+
+
+#converting team names to team ids in the season_stats_dataset (not fun)
+team_ids <- c("Rockets", "Bucks", "Pistons", "Bulls","Kings", "Suns", "Knicks", "Warriors", "Hawks", "76ers", "Cavaliers", "Lakers",  "Supersonics","Celtics", "Braves", "Bullets", "Trail Blazers", "Total","Jazz", "Bullets", "Kings", "Pacers", "Nets", "Nuggets", "Spurs", "Nets", "Clippers", "Jazz", "Mavericks", "Clippers", "Kings", "Hornets", "Heat", "Magic", "Timberwolves", "Grizzlies", "Raptors", "Wizards", "Grizzlies", "Hornets", "Bobcats", "Hornets", "Thunder", "Nets", "Pelicans", "Hornets")
+names(team_ids) <- unique(season_stats$Team)
+season_stats <- season_stats %>% mutate(Team = team_ids[Team])
+#Total is not a team, don't want this data
+season_stats <- season_stats %>% filter(Team != "Total")
+head(season_stats)
+head(team_results)
+```
+
+## Exploratory Analysis
+
+
+```{r}
+season_stats %>% group_by(Team,Year) %>% summarize(total_team_vorp = sum(VORP)) %>%
+   ggplot(aes(x=Year, y=total_team_vorp)) +
+    geom_point() +
+    geom_smooth(method = lm)
+```
+
+Here we look at teams' total VORPs across each year- that is the sum of the VORPS of each player who played for the team that year, during their time on the team. As we can see, VORP does a very good job of standardizing across years.
+
+```{r}
+#calculating total team VORP
+total_vorp_wins <- season_stats %>% group_by(Team,Year) %>% summarize(total_team_vorp = sum(VORP)) %>% inner_join(team_results, by = c("Team","Year"))
+
+#linear regression model on total team vorp
+total_vorp_model <- lm(win_pct ~ total_team_vorp, data = total_vorp_wins)
+
+total_vorp_wins %>% ggplot(aes(x=total_team_vorp, y=win_pct)) +
+    geom_point() +
+    geom_smooth(method = lm) +
+    labs(title = paste("Adj R2 = ",signif(summary(total_vorp_model)$adj.r.squared, 3),
+                     "Intercept =",signif(total_vorp_model$coef[[1]],3 ),
+                     "Coefficient =",signif(total_vorp_model$coef[[2]], 3)))
+
+```
+
+As we can see, total team VORP does a very good job at explaining win percentage, with a linear regression model having a R^2 of 0.91, better than other advanced stats such as PER (https://www.stat.berkeley.edu/~aldous/Research/Ugrad/Stanley_Yang%20_Thesis.pdf). The coefficient for Total Team Vorp is 0.026 which may seem small, but since we are measuring winning percentage and not wins, this actually corresponsd to ~ 2 wins (so a +1 increase in Total Team Vorp adds roughly 2 wins).
+
+
+
+
+```{r}
+#caclulating the rank of player vorp contribution to their team
+player_vorp_ranks <- season_stats %>% group_by(Year,Team) %>% mutate(player_rank = order(order(VORP, decreasing = TRUE)))
+
+#add cummulative sum of player vorp
+player_vorp_ranks <- player_vorp_ranks %>% arrange(player_rank) %>% group_by(Team,Year) %>% mutate(cVORP = cumsum(VORP)) %>% arrange(Year,Team)
+
+#get mean of cummulative vorp by rank
+mean_cvorps <- player_vorp_ranks %>% ungroup() %>% group_by(player_rank) %>% summarize(mean_cvorp = mean(cVORP)) %>% filter(player_rank <= 15) 
+
+#looking at team VORP contribution across player ranks
+mean_cvorps %>% ggplot(aes(x=player_rank, y=mean_cvorp)) +
+    geom_line() 
+```
+
+For this data, each player is ranked by their VORP for their team that year, i.e. the player with the highest VORP is ranked #1, second highest #2, etc. Here we have a graph of an average team's cummulative VORP as we go across the rankings of each player. As we can see, VORP decreases fairly quickly by player rank, and by the time we get to a team's 9th best player, VORP is around 0 and even dips to negative (A VORP of -2.0 is considered "replacement level").While having players who provide negative value play during a season is certainly not ideal, teams really have no other choice, as they have to give their quality players rest during games.Now the question is, how much do certain players/units have an impact on winning?
+
+Note: I'm only looking at players who ranked 1-15 (some teams have 20+ players due to roster changes during the year), as the sample size is much smaller past those number of players.
+
+## Regression Analysis
+
+
+```{r}
+
+#players who ranked #1 in vorp for their team that year
+best_player <- player_vorp_ranks %>% filter(player_rank == 1) %>% inner_join(team_results, by = c("Team","Year")) 
+
+#standardized vorps - how good was your best player relative to other teams' best players that year
+best_player_standardized <- best_player %>% group_by(Year) %>% summarize(mean_vorp = mean(VORP), sd_vorp = sd(VORP)) %>% left_join(best_player,by = "Year") %>% mutate(std_vorp = (VORP-mean_vorp)/sd_vorp) %>% select(Year,Player,std_vorp,win_pct)
+
+best_player_stdmodel <- lm(win_pct ~ std_vorp, data = best_player_standardized)
+best_player_standardized %>% ggplot(aes(x=std_vorp, y=win_pct)) +
+    geom_point() +
+    geom_smooth(method = lm) +
+    labs(title = paste("Adj R2 = ",signif(summary(best_player_stdmodel)$adj.r.squared, 3),
+                     "Intercept =",signif(best_player_stdmodel$coef[[1]],3 ),
+                     "Best Player Coefficient =",signif(best_player_stdmodel$coef[[2]], 3)))
+
+```
+
+In order to compare the impact individual players/units have on wins, I decided to standardize VORP by season according to whatever players/units I am comparing. This is because simply looking at VORP would not give us any extra information outside of how total team VORP is correlated to wins, as the coefficents would match up very closely. In this case, we see that a linear regression model that only looks at the relative performance of a team's best player doesn't greatly explain variance in win %, but there is a definite positive correlation.
+
+
+```{r}
+#sum total vorp of top 5 players on each team
+top5 <- player_vorp_ranks %>% group_by(Team,Year) %>% filter(player_rank <= 5) %>% summarize(top_5_vorp = sum(VORP))
+
+#sum total VORP of the rest of the players
+bench <- player_vorp_ranks %>% group_by(Team,Year) %>% filter(player_rank > 5) %>% summarize(bench_vorp = sum(VORP))
+
+#standardize each group relative to league that year
+top5sd <- top5 %>% group_by(Year) %>% summarize(mean_vorp = mean(top_5_vorp), sd_vorp = sd(top_5_vorp)) %>% left_join(top5, by = "Year") %>% mutate(std5_vorp = (top_5_vorp-mean_vorp)/sd_vorp) %>% select(Year,Team,std5_vorp)
+
+benchsd <- bench %>% group_by(Year) %>% summarize(mean_vorp = mean(bench_vorp), sd_vorp = sd(bench_vorp)) %>% left_join(bench, by = "Year") %>% mutate(stdb_vorp = (bench_vorp-mean_vorp)/sd_vorp) %>% select(Year,Team,stdb_vorp)
+
+#join results
+topvb <- top5sd %>% inner_join(benchsd, by = c("Team","Year")) %>% inner_join(team_results, by = c("Team","Year"))
+
+
+top5_model <- lm(win_pct ~ std5_vorp, data = topvb)
+bench_model <- lm(win_pct ~ stdb_vorp, data = topvb)
+
+#regression model with standardized top 5 players vs standardized bench players
+top5_bench_model <- lm(win_pct ~ std5_vorp+stdb_vorp, data = topvb)
+
+top5_bench_model %>%  broom::augment() %>% 
+   ggplot(aes(x=.fitted, y=win_pct)) +
+    geom_point() +
+    geom_smooth(method = lm) +
+    labs(title = paste("Adj R2 = ",signif(summary(top5_bench_model)$adj.r.squared, 2),
+                     "Intercept =",signif(top5_bench_model$coef[[1]],2 ),
+                     "Top 5 Coefficient =",signif(top5_bench_model$coef[[2]], 2),
+                     "Bench Coefficient =",signif(top5_bench_model$coef[[3]], 2)))
+
+```
+
+In this regression model, I divided teams into two units: a unit of a team's top 5 players by VORP (in the same vein as a team's starting 5, though these certainly do not have to be the same players), and a unit of the rest of a teams's players, which we'll call their bench. Both units are standardized to other units' performance in the league that year. 
+
+What we get is a model that does a very good job of explaining variance in winning %, which seems likely considering we are using the entire VORP of a team like a previous model, just in a different way. We see that the coefficents have a very interesting 2-1 ratio, and were statistically significant. 
+
+Since each group is standardized, we can interpret the coefficents as the change in win percentage due to a 1 standard deviation increase in unit performance relative to the league - which translates to ~9 wins for a top 5 group and ~4.5 for the rest of the team. This means that the difference between the best (99th percentile) and worst (1st percentile) "starters" is ~ 41 wins. Quartile win differences (25th and 75th percentiles) are roughly -6 and +6 wins respectively. "Bench" impact on win differences is roughly half of these numbers.
+
+## Variable Importance With Random Forests
+
+
+```{r}
+#spread player ranks across columns for wide dataset
+spread_ranks <- player_vorp_ranks %>% select(-Player,-cVORP) %>% spread(player_rank,VORP, fill = 0) %>% select(c(1:17))
+
+#df1- VORP for all players - renaming columns
+spread_ranks_w <- spread_ranks %>% inner_join(team_results, by = c("Year","Team")) %>% rename("r1" = "1","r2" = "2","r3" = "3","r4" = "4","r5" = "5","r6" = "6","r7" = "7","r8" = "8","r9" = "9","r10" = "10", "r11" = "11","r12" = "12", "r13" = "13", "r14" = "14", "r15" = "15")
+
+#df 2 has three units: 1-2, 3-5, rest of team
+spread_ranks_w2 <- spread_ranks_w %>% mutate(vorp12 = r1 + r2, vorp35 = r3+r4+r5,rest_vorp = r6+r7+r8+r9+r1+r11+r12+r13+r14+r15)
+
+#standardizing units
+spread_ranks_w2 <- spread_ranks_w2 %>% group_by(Year) %>% summarize(mean_12 = mean(vorp12), sd12 = sd(vorp12), mean_35 = mean(vorp35), sd35 = sd(vorp35), mean_rest = mean(rest_vorp), sd_rest = sd(rest_vorp)) %>% inner_join(spread_ranks_w2, by = "Year") %>% mutate(std_12 = (vorp12-mean_12)/sd12,std_35 = (vorp35-mean_35)/sd35, std_rest = (rest_vorp-mean_rest)/sd_rest) %>% select(Year,Team,std_12,std_35,std_rest,win_pct)
+
+
+#two random forest models: all player vorps and units
+library(randomForest)
+vorp_rf1 <- randomForest(win_pct~r1+r2+r3+r4+r5+r6+r7+r8+r9+r1+r11+r12+r13+r14+r15, importance=TRUE, data=spread_ranks_w)
+vorp_rf2 <- randomForest(win_pct~std_12+std_35+std_rest, importance=TRUE, data=spread_ranks_w2)
+
+#determining variable importance
+variable_importance1 <- importance(vorp_rf1)
+variable_importance2 <- importance(vorp_rf2)
+
+barplot(variable_importance1[,2],xlab = "Vairable", ylab = "Variable Importane (Increase in Node Purity)")
+barplot(variable_importance2[,2],xlab = "Vairable", ylab = "Variable Importane (Increase in Node Purity)")
+
+```
+
+For this analysis, I used two different models to test the importance of each palyer by rank. In the first model, I used a random forest to predict win percentage based on every player's (1-15) VORP, non-standardized. In the second model, I further divided teams into 3 units to try to test how importnat a teams "stars" are, using the top 2 players as one unit, players ranked 3-5 as another, and again the rest of the players as another unit, and standardized the vorp of each unit. 
+
+In this case, I wasn't as interested in building a predictive model as I was in looking at what features the model(s) deemed most important. Interestingly enough, neither the #1 player in the first model or two best players in the second model are considered the most imporant variables. My initial thought was that a higher VORP for the best player or top two players "gave room" for the 3rd,4th, and 5th best players to have a higher VORP, that may otherwise have them as the #1 or #2 player on another team. We can look at the correlation matrices for each model below to see how strong that hypothesis holds. While these results might give less credence to the idea of a "star-driven league" that many consider the NBA to be, I think it's important to look at these results in context: while these relationships exist as general predictors of winning percentage, they don't necessarily capture a formula for teams at the very top of the league competing for a championship. 
+
+However, I think that this analysis gives some insight into the value a player gives to a team based off of what group they fall in to, which can help with trade value and salary management. A team with this data can see how many wins a player who they believe improves their "bench"" unit by x% is worth, and properly assess that player's value in a trade or in free agency.
+
+
+```{r}
+#correlation matrices
+correlationMatrix <- cor(spread_ranks_w[,3:18])
+correlationMatrix2 <- cor(spread_ranks_w2[,3:6])
+
+#correlation between r1's VORP and rest of players' VORPs, winning percentage
+correlationMatrix[,1]
+
+#correlation between each units' standardized VORP and other units' VORPs, winning percentage
+correlationMatrix2
 ```
 
