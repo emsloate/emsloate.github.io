@@ -24,11 +24,11 @@ library(tidyverse)
 library(dplyr)
 library(readxl)
 #reading in player stats, filtering our old seasons, we only need player, team, year and VORP
-season_stats = read_csv("~/Documents/Sophmore Year Classes/CMSC320/Final Project/Seasons_Stats.csv")
+season_stats = read_csv("~/Documents/Final Project/Seasons_Stats.csv")
 season_stats <- season_stats %>% filter(Year >= 1974 & Year < 2017) %>% select(Year,Player,Tm,VORP) %>% transform(VORP = as.numeric(VORP)) %>% rename(Team = Tm)
 
 #reading in team results, converting years & teams to same as player dataset
-team_results = read_xlsx("~/Documents/Sophmore Year Classes/CMSC320/Final Project/Historical NBA Performance.xlsx")
+team_results = read_xlsx("~/Documents/Final Project/Historical NBA Performance.xlsx")
 #clean up year data, add 1 to each year to match up
 team_results <- team_results %>% rename(win_pct = Winning_Percentage) %>% select(Year, Team, win_pct)
 team_results <- team_results %>% mutate(Year = if_else(str_detect(Year,"\\d{1,2}/\\d/\\d{4}"), str_match(Year,"\\d{1,2}/\\d/(\\d{4})")[,2], substr(Year,1,4)))
@@ -85,7 +85,7 @@ As we can see, total team VORP does a very good job at explaining win percentage
 
 
 ```{r}
-#caclulating the rank of player vorp contribution to their team
+#calculating the rank of player vorp contribution to their team
 player_vorp_ranks <- season_stats %>% group_by(Year,Team) %>% mutate(player_rank = order(order(VORP, decreasing = TRUE)))
 
 #add cummulative sum of player vorp
@@ -158,6 +158,7 @@ top5_bench_model %>%  broom::augment() %>%
                      "Top 5 Coefficient =",signif(top5_bench_model$coef[[2]], 2),
                      "Bench Coefficient =",signif(top5_bench_model$coef[[3]], 2)))
 
+cor(topvb[,3:5])
 ```
 
 In this regression model, I divided teams into two units: a unit of a team's top 5 players by VORP (in the same vein as a team's starting 5, though these certainly do not have to be the same players), and a unit of the rest of a teams's players, similar to a team's bench. Both units are standardized to other units' performance in the league that year. 
@@ -165,6 +166,8 @@ In this regression model, I divided teams into two units: a unit of a team's top
 What we get is a model that does a very good job of explaining variance in winning %, which seems likely considering we are using the entire VORP of a team like a previous model, just in a different way. We see that the coefficents have a very interesting 2-1 ratio on the dot, and were statistically significant. 
 
 Since each group is standardized, we can interpret the coefficents as the change in win percentage due to a 1 standard deviation increase in unit performance relative to the league - which translates to ~9 wins for the top 5 group and ~4.5 wins for the rest of the team. This means that the difference between the best (99th percentile) and worst (1st percentile) "starters" is ~ 41 wins. Quartile win differences (25th and 75th percentiles) are roughly -6 and +6 wins respectively. "Bench" impact on win differences is roughly half of these numbers.
+
+Our correlation matrix shows some correlation between "starter" performance and "bench" performance", but they are not highly correlated.
 
 ## Variable Importance With Random Forests
 
