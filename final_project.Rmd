@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Roster Building in 
+## Roster Building in The NBA
 One of the fundamental questions anyone in the position of making changes to a team's roster in any sport is: "How much more are we winning by adding this player?". Similarly, one can ask themselves "How much less are we winning by losing this player?" While the attempt to quantify an individual player's contribution to winning is far from over, one stat that can help answer this in the NBA is Value Over Replacement Player, or VORP, which is explained here: https://www.basketball-reference.com/about/bpm.html. Here's a TL;DR - VORP measures the number of points a player produces compared to a "replacement level" player per 100 team possesions over a season. Some nice things about VORP are that a) It is already standardized to the league average and b) It takes minutes played into account, which gives a more accurate reflection of the impact a player has on a team.
 
 With this in mind, one question about roster composition I seek to answer is how important is the distribution of VORP? Imagine two teams with identical total VORP in a season- is a team with one (or 2) incredibly valueable players better or worse than a team whose VORP is (closer to) evenly distributed? Similarly, how important are a teams starters to their success compared to their bench? I look to answer questions like these in this analysis.
